@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ultimate Tic-Tac-Toe</title>
+    <style>
+        :root {
+            --bg-color: #1e1e1e;
+            --text-color: #f0f0f0;
+            --accent-blue: #4facfe;
+            --accent-red: #ff5e62;
+            --board-border: #444;
+            --active-highlight: rgba(255, 255, 255, 0.1);
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        h1 { margin-bottom: 10px; }
+        
+        #status {
+            margin-bottom: 20px;
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+
+        /* The Main Global Grid (3x3 big boards) */
+        .global-board {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            background-color: var(--board-border);
+            padding: 10px;
+            border-radius: 10px;
+        }
+
+        /* The Small Boards (3x3 cells) */
+        .local-board {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 2px;
+            background-color: var(--bg-color);
+            width: 150px;
+            height: 150px;
+            position: relative;
+        }
+
+        /* Highlighting valid boards */
+        .local-board.active {
+            box-shadow: 0 0 15px var(--accent-blue);
+            border: 2px solid var(--accent-blue);
+            z-index: 10;
+        }
+
+        /* Individual Cells */
+        .cell {
+            background-color: #2a2a2a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .cell:hover { background-color: #333; }
+        .cell.x { color: var(--accent-blue); }
+        .cell.o { color: var(--accent-red); }
+
+        /* Overlays for won local boards */
+        .local-winner {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 5rem;
+            font-weight: bold;
+            background-color: rgba(30, 30, 30, 0.85);
+            z-index: 5;
+        }
+        .local-winner.X { color: var(--accent-blue); }
+        .local-winner.O { color: var(--accent-red); }
+
+        button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            background: var(--accent-blue);
+            border: none;
+            color: white;
+            font-size: 1rem;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Super Tic-Tac-Toe</h1>
+    <div id="status">Current Player: <span style="color:var(--accent-blue)">X</span></div>
+    
+    <div class="global-board" id="gameBoard">
+        </div>
+
+    <button onclick="resetGame()">Restart Game</button>
+
+    <script>
+        const gameContainer = document.getElementById('gameBoard');
+        const statusDisplay = document.getElementById('status');
+        
+        // State
+        let currentPlayer = 'X';
+        let globalBoard = Array(9).fill(null); // Track wins of big boards
+        let localBoards = Array(9).fill(null).map(() => Array(9).fill(null)); // 9 boards, 9 cells each
+        let nextBoardIndex = -1; // -1 means player can play ANYWHERE
+        let gameActive = true;
+
+        const winningCombinations = [
+            [0, 1, 2], [3, 4, 5], [6, 7, 8], // Rows
+            [0, 3, 6], [1, 4, 7], [2, 5, 8], // Cols
+            [0, 4, 8], [2, 4, 6]             // Diagonals
+        ];
+
+        // Initialize UI
+        function initGame() {
+            gameContainer.innerHTML = '';
+            for (let i = 0; i < 9; i++) {
+                const boardDiv = document.createElement('div');
+                boardDiv.classList.add('local-board');
+                boardDiv.dataset.boardIndex = i;
+                
+                for (let j = 0; j < 9; j++) {
+                    const cellDiv = document.createElement('div');
+                    cellDiv.classList.add('cell');
+                    cellDiv.dataset.cellIndex = j;
+                    cellDiv.addEventListener('click', () => handleCellClick(i, j));
+                    boardDiv.appendChild(cellDiv);
+                }
+                gameContainer.appendChild(boardDiv);
+            }
+            updateVisuals();
+        }
+
+        function handleCellClick(boardIdx, cellIdx) {
+            if (!gameActive) return;
+
+            // Validation 1: Is the cell empty?
+            if (localBoards[boardIdx][cellIdx] !== null) return;
+
+            // Validation 2: Is the player allowed to play on this board?
+            // If nextBoardIndex is -1, they can play anywhere (that isn't won).
+            // Otherwise, they must play on the specific board index.
+            if (nextBoardIndex !== -1 && nextBoardIndex !== boardIdx) return;
+
+            // Validation 3: Check if the board is already won/full (shouldn't be clickable, but extra safety)
+            if (globalBoard[boardIdx] !== null) return;
+
+            // --- EXECUTE MOVE ---
+            localBoards[boardIdx][cellIdx] = currentPlayer;
+            
+            // Check for Local Win
+            checkLocalWin(boardIdx);
+
+            // Check for Global Win
+            checkGlobalWin();
+
+            // Set constraints for next turn
+            if (gameActive) {
+                switchPlayer();
+                setNextBoardConstraint(cellIdx); // The cell index becomes the next board index
+                updateVisuals();
+            }
+        }
+
+        function checkLocalWin(boardIdx) {
+            const board = localBoards[boardIdx];
+            let winner = null;
+
+            // Check wins
+            for (let combo of winningCombinations) {
+                const [a, b, c] = combo;
+                if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+                    winner = board[a];
+                    break;
+                }
+            }
+
+            // Check draw (full board)
+            if (!winner && board.every(cell => cell !== null)) {
+                winner = 'T'; // Tie
+            }
+
+            if (winner) {
+                globalBoard[boardIdx] = winner;
+            }
+        }
+
+        function setNextBoardConstraint(targetBoardIdx) {
+            // Rule: If the target board is already won or full, the next player can play ANYWHERE.
+            if (globalBoard[targetBoardIdx] !== null) {
+                nextBoardIndex = -1;
+            } else {
+                nextBoardIndex = targetBoardIdx;
+            }
+        }
+
+        function switchPlayer() {
+            currentPlayer = currentPlayer === 'X' ? 'O' : 'X';
+        }
+
+        function checkGlobalWin() {
+            let winner = null;
+            for (let combo of winningCombinations) {
+                const [a, b, c] = combo;
+                if (globalBoard[a] && globalBoard[a] !== 'T' && 
+                    globalBoard[a] === globalBoard[b] && globalBoard[a] === globalBoard[c]) {
+                    winner = globalBoard[a];
+                    break;
+                }
+            }
+
+            if (winner) {
+                gameActive = false;
+                statusDisplay.innerHTML = `Player ${winner} WINS THE GAME!`;
+                statusDisplay.style.color = winner === 'X' ? 'var(--accent-blue)' : 'var(--accent-red)';
+                nextBoardIndex = -1; // Clear highlights
+            }
+        }
+
+        function updateVisuals() {
+            const boards = document.querySelectorAll('.local-board');
+            
+            boards.forEach((boardDiv, idx) => {
+                // 1. Update Cells
+                const cells = boardDiv.querySelectorAll('.cell');
+                localBoards[idx].forEach((val, cIdx) => {
+                    cells[cIdx].innerText = val || '';
+                    if(val) cells[cIdx].classList.add(val.toLowerCase());
+                });
+
+                // 2. Handle Won Boards (Overlay)
+                if (globalBoard[idx] && !boardDiv.querySelector('.local-winner')) {
+                    const overlay = document.createElement('div');
+                    overlay.classList.add('local-winner');
+                    if (globalBoard[idx] !== 'T') {
+                        overlay.classList.add(globalBoard[idx]);
+                        overlay.innerText = globalBoard[idx];
+                    } else {
+                        overlay.style.fontSize = "2rem";
+                        overlay.innerText = "-"; // Visual for Tie
+                    }
+                    boardDiv.appendChild(overlay);
+                }
+
+                // 3. Highlight Active Board
+                boardDiv.classList.remove('active');
+                if (gameActive) {
+                    // Highlight if it's the specific target OR if it's free play (-1) and board isn't won
+                    if ((nextBoardIndex === idx || nextBoardIndex === -1) && globalBoard[idx] === null) {
+                        boardDiv.classList.add('active');
+                    }
+                }
+            });
+
+            if (gameActive) {
+                const color = currentPlayer === 'X' ? 'var(--accent-blue)' : 'var(--accent-red)';
+                statusDisplay.innerHTML = `Current Player: <span style="color:${color}">${currentPlayer}</span>`;
+            }
+        }
+
+        function resetGame() {
+            currentPlayer = 'X';
+            globalBoard = Array(9).fill(null);
+            localBoards = Array(9).fill(null).map(() => Array(9).fill(null));
+            nextBoardIndex = -1;
+            gameActive = true;
+            initGame();
+        }
+
+        // Start
+        initGame();
+    </script>
+</body>
+</html>
